@@ -91,7 +91,58 @@
     .tip { color: var(--muted); font-size: 14px; }
 
     @media (max-width: 760px) {
-      .hud { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      body {
+        padding: 8px;
+        align-items: flex-start;
+      }
+
+      .wrap {
+        width: 100%;
+      }
+
+      .hud {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .card {
+        padding: 8px 10px;
+        border-radius: 12px;
+      }
+
+      .label {
+        font-size: 10px;
+      }
+
+      .value {
+        font-size: 16px;
+      }
+
+      canvas {
+        width: 100%;
+        max-height: 58vh;
+        border-radius: 16px;
+      }
+
+      .controls {
+        margin-top: 8px;
+        gap: 8px;
+      }
+
+      .keyboard-controls {
+        display: none;
+      }
+
+      .tip {
+        font-size: 12px;
+      }
+
+      .mobile-controls button {
+        font-size: 24px !important;
+        padding: 14px 18px !important;
+        min-width: 64px;
+      }
     }
   </style>
 </head>
@@ -108,19 +159,63 @@
     <canvas id="game" width="900" height="675"></canvas>
 
     <div class="controls">
-      <div class="card">
+      <div class="card keyboard-controls">
         <div><strong>Move:</strong> A / D or Arrow keys</div>
         <div><strong>Shoot:</strong> Space</div>
         <div><strong>Pause:</strong> P</div>
         <div><strong>Restart:</strong> Enter</div>
+        <div><strong>Bonus:</strong> Shoot the UFO for extra points</div>
       </div>
+
       <div class="card tip">
         Clear waves, survive enemy fire, and beat the purple boss ship on level 3.
+      </div>
+
+      <div class="card mobile-controls" style="text-align:center;">
+        <div style="margin-bottom:6px; font-size:14px; color:#9fb2d8;">Mobile Controls</div>
+        <div style="display:flex; justify-content:center; gap:14px;">
+          <button id="leftBtn" style="font-size:22px;padding:10px 16px;border-radius:10px;">◀</button>
+          <button id="fireBtn" style="font-size:22px;padding:10px 20px;border-radius:10px;">🔥</button>
+          <button id="rightBtn" style="font-size:22px;padding:10px 16px;border-radius:10px;">▶</button>
+        </div>
       </div>
     </div>
   </div>
 
   <script>
+
+    // MOBILE BUTTON HANDLERS
+    function bindMobileControls(){
+      const left=document.getElementById('leftBtn');
+      const right=document.getElementById('rightBtn');
+      const fire=document.getElementById('fireBtn');
+      if(!left||!right||!fire) return;
+
+      const press = (key) => (e) => {
+        e.preventDefault();
+        keys[key] = true;
+        if (!audioReady) initAudio();
+      };
+      const release = (key) => (e) => {
+        e.preventDefault();
+        keys[key] = false;
+      };
+
+      left.addEventListener('touchstart', press('arrowleft'), {passive:false});
+      left.addEventListener('touchend', release('arrowleft'), {passive:false});
+      left.addEventListener('touchcancel', release('arrowleft'), {passive:false});
+
+      right.addEventListener('touchstart', press('arrowright'), {passive:false});
+      right.addEventListener('touchend', release('arrowright'), {passive:false});
+      right.addEventListener('touchcancel', release('arrowright'), {passive:false});
+
+      fire.addEventListener('touchstart', press(' '), {passive:false});
+      fire.addEventListener('touchend', release(' '), {passive:false});
+      fire.addEventListener('touchcancel', release(' '), {passive:false});
+    }
+
+    window.addEventListener('load',bindMobileControls);
+
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
 
@@ -178,8 +273,8 @@
       a: Math.random() * 0.7 + 0.3,
     }));
 
-    let player, bullets, enemyBullets, enemies, barriers, particles, boss;
-    let enemyDirection, enemySpeed, enemyDropDistance, lastEnemyShot, lastTime;
+    let player, bullets, enemyBullets, enemies, barriers, particles, boss, ufo;
+    let enemyDirection, enemySpeed, enemyDropDistance, lastEnemyShot, lastTime, lastUfoSpawn;
     let score, lives, level, fireCooldown, gameOver, win, paused;
     let highScore = Number(localStorage.getItem('space_invaders_highscore') || 0);
 
@@ -191,11 +286,56 @@
       bossEl.textContent = boss && boss.alive ? 'Yes' : 'No';
     }
 
+    function maybeSpawnUfo() {
+      if (ufo || boss && boss.alive || gameOver || win) return;
+      const now = performance.now();
+      const minDelay = 12000;
+      if (now - lastUfoSpawn < minDelay) return;
+      if (Math.random() < 0.0022) {
+        const fromLeft = Math.random() < 0.5;
+        ufo = {
+          x: fromLeft ? -90 : canvas.width + 90,
+          y: 34,
+          w: 72,
+          h: 28,
+          speed: fromLeft ? 3.2 : -3.2,
+          points: [50, 100, 150, 200][Math.floor(Math.random() * 4)],
+        };
+        lastUfoSpawn = now;
+        beep(520, 0.07, 'triangle', 0.018);
+      }
+    };
+        lastUfoSpawn = now;
+        beep(520, 0.07, 'triangle', 0.018);
+      }
+    }
+
+    function updateUfo() {
+      if (!ufo) return;
+      ufo.x += ufo.speed;
+      playUfoSound();
+      if ((ufo.speed > 0 && ufo.x > canvas.width + 100) || (ufo.speed < 0 && ufo.x + ufo.w < -100)) {
+        ufo = null;
+      }
+    }
+
+    let lastUfoBeep = 0;
+    function playUfoSound() {
+      if (!ufo) return;
+      const now = performance.now();
+      if (now - lastUfoBeep < 380) return;
+      lastUfoBeep = now;
+      beep(640, 0.05, 'triangle', 0.012);
+    }
+    }
+
     function resetGame() {
       player = { x: canvas.width / 2 - 28, y: canvas.height - 62, w: 56, h: 24, speed: 7 };
       bullets = [];
       enemyBullets = [];
       particles = [];
+      ufo = null;
+      lastUfoSpawn = performance.now();
       barriers = createBarriers();
       score = 0;
       lives = 3;
@@ -333,6 +473,9 @@
         updateEnemies();
       }
 
+      maybeSpawnUfo();
+      updateUfo();
+
       handlePlayerBulletHits();
       handleEnemyBulletHits();
       handleBarrierCollisions();
@@ -374,6 +517,31 @@
           lastEnemyShot = now;
         }
       }
+
+      if (living.length <= 12) {
+        playMarchSound(420, 0.03);
+      }
+    }
+
+      if (hitEdge) {
+        enemyDirection *= -1;
+        for (const e of living) e.y += enemyDropDistance;
+      }
+
+      const now = performance.now();
+      if (living.length && now - lastEnemyShot > Math.max(260, 1100 - level * 170 - living.length * 6)) {
+        const bottomByColumn = new Map();
+        for (const e of living) {
+          const col = Math.round(e.x / 55);
+          if (!bottomByColumn.has(col) || e.y > bottomByColumn.get(col).y) bottomByColumn.set(col, e);
+        }
+        const shooters = Array.from(bottomByColumn.values());
+        const shooter = shooters[Math.floor(Math.random() * shooters.length)];
+        if (shooter) {
+          enemyShoot(shooter.x + shooter.w / 2 - 2, shooter.y + shooter.h, 4 + level * 0.25);
+          lastEnemyShot = now;
+        }
+      }
     }
 
     function updateBoss() {
@@ -389,8 +557,28 @@
       }
     }
 
+    let lastMarchBeep = 0;
+    function playMarchSound(freq = 380, duration = 0.025) {
+      const now = performance.now();
+      if (now - lastMarchBeep < 240) return;
+      lastMarchBeep = now;
+      beep(freq, duration, 'square', 0.01);
+    }
+    }
+
     function handlePlayerBulletHits() {
       for (const b of bullets) {
+        if (ufo && rectsIntersect(b, ufo)) {
+          const bonus = ufo.points;
+          score += bonus;
+          spawnExplosion(ufo.x + ufo.w / 2, ufo.y + ufo.h / 2, '#ff5d8f', 24);
+          beep(920, 0.08, 'square', 0.03);
+          b.y = -999;
+          particles.push({ x: ufo.x + ufo.w / 2, y: ufo.y - 8, vx: 0, vy: -0.35, life: 55, size: bonus, color: '#ffffff', text: `+${bonus}` });
+          ufo = null;
+          continue;
+        }
+
         if (boss && boss.alive && rectsIntersect(b, boss)) {
           boss.hp -= 1;
           b.y = -999;
@@ -479,10 +667,10 @@
 
     function updateParticles() {
       for (const p of particles) {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.vx *= 0.98;
-        p.vy *= 0.98;
+        p.x += p.vx || 0;
+        p.y += p.vy || 0;
+        p.vx = (p.vx || 0) * 0.98;
+        p.vy = (p.vy || 0) * 0.98;
         p.life -= 1;
       }
       particles = particles.filter(p => p.life > 0);
@@ -559,6 +747,20 @@
       }
     }
 
+    function drawUfo() {
+      if (!ufo) return;
+      ctx.save();
+      ctx.translate(ufo.x, ufo.y);
+      ctx.fillStyle = '#ff5d8f';
+      ctx.fillRect(14, 10, ufo.w - 28, 12);
+      ctx.fillRect(0, 14, 18, 8);
+      ctx.fillRect(ufo.w - 18, 14, 18, 8);
+      ctx.fillRect(24, 2, ufo.w - 48, 10);
+      ctx.clearRect(18, 14, 8, 5);
+      ctx.clearRect(ufo.w - 26, 14, 8, 5);
+      ctx.restore();
+    }
+
     function drawBoss() {
       if (!boss || !boss.alive) return;
       ctx.save();
@@ -601,9 +803,15 @@
 
     function drawParticles() {
       for (const p of particles) {
-        ctx.globalAlpha = Math.max(0, p.life / 40);
-        ctx.fillStyle = p.color;
-        ctx.fillRect(p.x, p.y, p.size, p.size);
+        ctx.globalAlpha = Math.max(0, p.life / 55);
+        if (p.text) {
+          ctx.fillStyle = p.color;
+          ctx.font = 'bold 20px Arial';
+          ctx.fillText(p.text, p.x, p.y);
+        } else {
+          ctx.fillStyle = p.color;
+          ctx.fillRect(p.x, p.y, p.size, p.size);
+        }
       }
       ctx.globalAlpha = 1;
     }
@@ -636,6 +844,7 @@
     function draw() {
       drawBackground();
       drawBarriers();
+      if (ufo) drawUfo();
       if (boss && boss.alive) drawBoss();
       else drawEnemies();
       drawPlayer();
