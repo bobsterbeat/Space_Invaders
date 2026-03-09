@@ -168,7 +168,7 @@
       </div>
 
       <div class="card tip">
-        Clear waves, survive enemy fire, and beat the purple boss ship on level 3.
+        Clear waves, survive enemy fire, beat boss ships every 3 levels, and chase a bigger high score as the game gets harder.
       </div>
 
       <div class="card mobile-controls" style="text-align:center;">
@@ -183,698 +183,667 @@
   </div>
 
   <script>
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
 
-    // MOBILE BUTTON HANDLERS
-    function bindMobileControls(){
-      const left=document.getElementById('leftBtn');
-      const right=document.getElementById('rightBtn');
-      const fire=document.getElementById('fireBtn');
-      if(!left||!right||!fire) return;
+  const scoreEl = document.getElementById('score');
+  const livesEl = document.getElementById('lives');
+  const levelEl = document.getElementById('level');
+  const highscoreEl = document.getElementById('highscore');
+  const bossEl = document.getElementById('boss');
 
-      const press = (key) => (e) => {
-        e.preventDefault();
-        keys[key] = true;
-        if (!audioReady) initAudio();
-      };
-      const release = (key) => (e) => {
-        e.preventDefault();
-        keys[key] = false;
-      };
+  const keys = {};
+  let audioReady = false;
+  let audioCtx;
 
-      left.addEventListener('touchstart', press('arrowleft'), {passive:false});
-      left.addEventListener('touchend', release('arrowleft'), {passive:false});
-      left.addEventListener('touchcancel', release('arrowleft'), {passive:false});
+  let player, bullets, enemyBullets, enemies, barriers, particles, boss, ufo;
+  let enemyDirection, enemySpeed, enemyDropDistance, lastEnemyShot, lastTime, lastUfoSpawn;
+  let score, lives, level, fireCooldown, gameOver, win, paused;
+  let lastUfoBeep = 0;
+  let lastMarchBeep = 0;
+  let highScore = Number(localStorage.getItem('space_invaders_highscore') || 0);
 
-      right.addEventListener('touchstart', press('arrowright'), {passive:false});
-      right.addEventListener('touchend', release('arrowright'), {passive:false});
-      right.addEventListener('touchcancel', release('arrowright'), {passive:false});
+  function bindMobileControls() {
+    const left = document.getElementById('leftBtn');
+    const right = document.getElementById('rightBtn');
+    const fire = document.getElementById('fireBtn');
+    if (!left || !right || !fire) return;
 
-      fire.addEventListener('touchstart', press(' '), {passive:false});
-      fire.addEventListener('touchend', release(' '), {passive:false});
-      fire.addEventListener('touchcancel', release(' '), {passive:false});
-    }
-
-    window.addEventListener('load',bindMobileControls);
-
-    const canvas = document.getElementById('game');
-    const ctx = canvas.getContext('2d');
-
-    const scoreEl = document.getElementById('score');
-    const livesEl = document.getElementById('lives');
-    const levelEl = document.getElementById('level');
-    const highscoreEl = document.getElementById('highscore');
-    const bossEl = document.getElementById('boss');
-
-    const keys = {};
-    let audioReady = false;
-    let audioCtx;
-
-    document.addEventListener('keydown', (e) => {
-      const k = e.key.toLowerCase();
-      keys[k] = true;
-      if ([" ", "arrowleft", "arrowright", "arrowup", "arrowdown"].includes(k) || e.key === ' ') e.preventDefault();
+    const press = (key) => (e) => {
+      e.preventDefault();
+      keys[key] = true;
       if (!audioReady) initAudio();
-      if ((gameOver || win) && e.key === 'Enter') resetGame();
-      if (k === 'p' && !gameOver && !win) paused = !paused;
-    });
-
-    document.addEventListener('keyup', (e) => {
-      keys[e.key.toLowerCase()] = false;
-    });
-
-    function initAudio() {
-      try {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        audioReady = true;
-      } catch {
-        audioReady = false;
-      }
-    }
-
-    function beep(freq = 440, duration = 0.06, type = 'square', volume = 0.02) {
-      if (!audioReady || !audioCtx) return;
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = type;
-      osc.frequency.value = freq;
-      gain.gain.value = volume;
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start();
-      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
-      osc.stop(audioCtx.currentTime + duration);
-    }
-
-    const stars = Array.from({ length: 110 }, () => ({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      r: Math.random() * 2.1 + 0.4,
-      s: Math.random() * 0.5 + 0.15,
-      a: Math.random() * 0.7 + 0.3,
-    }));
-
-    let player, bullets, enemyBullets, enemies, barriers, particles, boss, ufo;
-    let enemyDirection, enemySpeed, enemyDropDistance, lastEnemyShot, lastTime, lastUfoSpawn;
-    let score, lives, level, fireCooldown, gameOver, win, paused;
-    let highScore = Number(localStorage.getItem('space_invaders_highscore') || 0);
-
-    function updateHud() {
-      scoreEl.textContent = score;
-      livesEl.textContent = lives;
-      levelEl.textContent = level;
-      highscoreEl.textContent = highScore;
-      bossEl.textContent = boss && boss.alive ? 'Yes' : 'No';
-    }
-
-    function maybeSpawnUfo() {
-      if (ufo || (boss && boss.alive) || gameOver || win) return;
-      const now = performance.now();
-      const minDelay = Math.max(7000, 13000 - level * 400);
-      if (now - lastUfoSpawn < minDelay) return;
-      const spawnChance = Math.min(0.01, 0.003 + level * 0.0008);
-      if (Math.random() < spawnChance) {
-        const fromLeft = Math.random() < 0.5;
-        ufo = {
-          x: fromLeft ? -90 : canvas.width + 90,
-          y: 34,
-          w: 72,
-          h: 28,
-          speed: fromLeft ? 3.2 + level * 0.18 : -(3.2 + level * 0.18),
-          points: [100, 150, 200, 300][Math.floor(Math.random() * 4)],
-        };
-        lastUfoSpawn = now;
-        beep(520, 0.07, 'triangle', 0.018);
-      }
     };
-        lastUfoSpawn = now;
-        beep(520, 0.07, 'triangle', 0.018);
+    const release = (key) => (e) => {
+      e.preventDefault();
+      keys[key] = false;
+    };
+
+    left.addEventListener('touchstart', press('arrowleft'), { passive: false });
+    left.addEventListener('touchend', release('arrowleft'), { passive: false });
+    left.addEventListener('touchcancel', release('arrowleft'), { passive: false });
+
+    right.addEventListener('touchstart', press('arrowright'), { passive: false });
+    right.addEventListener('touchend', release('arrowright'), { passive: false });
+    right.addEventListener('touchcancel', release('arrowright'), { passive: false });
+
+    fire.addEventListener('touchstart', press(' '), { passive: false });
+    fire.addEventListener('touchend', release(' '), { passive: false });
+    fire.addEventListener('touchcancel', release(' '), { passive: false });
+  }
+
+  window.addEventListener('load', bindMobileControls);
+
+  document.addEventListener('keydown', (e) => {
+    const k = e.key.toLowerCase();
+    keys[k] = true;
+    if ([' ', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(k) || e.key === ' ') e.preventDefault();
+    if (!audioReady) initAudio();
+    if (gameOver && e.key === 'Enter') resetGame();
+    if (k === 'p' && !gameOver) paused = !paused;
+  });
+
+  document.addEventListener('keyup', (e) => {
+    keys[e.key.toLowerCase()] = false;
+  });
+
+  function initAudio() {
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      audioReady = true;
+    } catch {
+      audioReady = false;
+    }
+  }
+
+  function beep(freq = 440, duration = 0.06, type = 'square', volume = 0.02) {
+    if (!audioReady || !audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.value = volume;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+    osc.stop(audioCtx.currentTime + duration);
+  }
+
+  function playUfoSound() {
+    if (!ufo) return;
+    const now = performance.now();
+    if (now - lastUfoBeep < 380) return;
+    lastUfoBeep = now;
+    beep(640, 0.05, 'triangle', 0.012);
+  }
+
+  function playMarchSound(freq = 380, duration = 0.025) {
+    const now = performance.now();
+    const living = enemies ? enemies.filter(e => e.alive).length : 50;
+    const interval = Math.max(70, 260 - (50 - living) * 4 - level * 6);
+    if (now - lastMarchBeep < interval) return;
+    lastMarchBeep = now;
+    beep(freq, duration, 'square', 0.01);
+  }
+
+  const stars = Array.from({ length: 110 }, () => ({
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height,
+    r: Math.random() * 2.1 + 0.4,
+    s: Math.random() * 0.5 + 0.15,
+    a: Math.random() * 0.7 + 0.3,
+  }));
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    levelEl.textContent = level;
+    highscoreEl.textContent = highScore;
+    bossEl.textContent = boss && boss.alive ? 'Yes' : 'No';
+  }
+
+  function resetGame() {
+    player = { x: canvas.width / 2 - 28, y: canvas.height - 62, w: 56, h: 24, speed: 7 };
+    bullets = [];
+    enemyBullets = [];
+    particles = [];
+    ufo = null;
+    score = 0;
+    lives = 3;
+    level = 1;
+    fireCooldown = 0;
+    gameOver = false;
+    win = false;
+    paused = false;
+    boss = null;
+    lastUfoSpawn = performance.now() - 12000;
+    setupWave();
+    updateHud();
+  }
+
+  function setupWave() {
+    enemies = [];
+    boss = null;
+
+    const rows = 5;
+    const cols = 10;
+    const enemyW = 48;
+    const enemyH = 26;
+    const padX = 16;
+    const padY = 16;
+    const startX = 105;
+    const startY = 75;
+    const isBossLevel = level % 3 === 0;
+
+    if (!isBossLevel) {
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          enemies.push({
+            x: startX + c * (enemyW + padX),
+            y: startY + r * (enemyH + padY),
+            w: enemyW,
+            h: enemyH,
+            row: r,
+            alive: true,
+            flash: 0,
+          });
+        }
+      }
+    } else {
+      const bossTier = Math.floor(level / 3);
+      boss = {
+        x: canvas.width / 2 - 100,
+        y: 90,
+        w: 200,
+        h: 90,
+        hp: 34 + bossTier * 16,
+        maxHp: 34 + bossTier * 16,
+        speed: 2.6 + bossTier * 0.35,
+        dir: 1,
+        alive: true,
+        cooldown: Math.max(18, 42 - bossTier * 3),
+      };
+    }
+
+    enemyDirection = 1;
+    enemySpeed = 0.6 + (level - 1) * 0.18;
+    enemyDropDistance = 16 + Math.min(8, Math.floor(level / 2));
+    lastEnemyShot = 0;
+    bullets = [];
+    enemyBullets = [];
+    barriers = createBarriers();
+    lastUfoSpawn = performance.now() - 12000;
+    updateHud();
+  }
+
+  function createBarriers() {
+    const blocks = [];
+    const shape = ['  xxxx  ', ' xxxxxx ', 'xxxxxxxx', 'xxx  xxx'];
+    const isBossLevel = level % 3 === 0;
+    const count = isBossLevel ? 3 : 4;
+    const size = 11;
+    const gap = count === 3 ? 220 : 165;
+    const start = count === 3 ? 140 : 92;
+
+    for (let b = 0; b < count; b++) {
+      const ox = start + b * gap;
+      const oy = canvas.height - 170;
+      for (let r = 0; r < shape.length; r++) {
+        for (let c = 0; c < shape[r].length; c++) {
+          if (shape[r][c] === 'x') {
+            blocks.push({ x: ox + c * size, y: oy + r * size, w: size - 1, h: size - 1, hp: isBossLevel ? 2 : 3 });
+          }
+        }
       }
     }
+    return blocks;
+  }
 
-    function updateUfo() {
-      if (!ufo) return;
-      ufo.x += ufo.speed;
-      playUfoSound();
-      if ((ufo.speed > 0 && ufo.x > canvas.width + 100) || (ufo.speed < 0 && ufo.x + ufo.w < -100)) {
-        ufo = null;
-      }
+  function maybeSpawnUfo() {
+    if (ufo || (boss && boss.alive) || gameOver) return;
+    const now = performance.now();
+    const minDelay = Math.max(7000, 13000 - level * 400);
+    if (now - lastUfoSpawn < minDelay) return;
+    const spawnChance = Math.min(0.01, 0.003 + level * 0.0008);
+    if (Math.random() < spawnChance) {
+      const fromLeft = Math.random() < 0.5;
+      ufo = {
+        x: fromLeft ? -90 : canvas.width + 90,
+        y: 34,
+        w: 72,
+        h: 28,
+        speed: fromLeft ? 3.2 + level * 0.18 : -(3.2 + level * 0.18),
+        points: [100, 150, 200, 300][Math.floor(Math.random() * 4)],
+      };
+      lastUfoSpawn = now;
+      beep(520, 0.07, 'triangle', 0.018);
     }
+  }
 
-    let lastUfoBeep = 0;
-    function playUfoSound() {
-      if (!ufo) return;
-      const now = performance.now();
-      if (now - lastUfoBeep < 380) return;
-      lastUfoBeep = now;
-      beep(640, 0.05, 'triangle', 0.012);
-    }
-    }
-
-    function resetGame() {
-      player = { x: canvas.width / 2 - 28, y: canvas.height - 62, w: 56, h: 24, speed: 7 };
-      bullets = [];
-      enemyBullets = [];
-      particles = [];
+  function updateUfo() {
+    if (!ufo) return;
+    ufo.x += ufo.speed;
+    playUfoSound();
+    if ((ufo.speed > 0 && ufo.x > canvas.width + 100) || (ufo.speed < 0 && ufo.x + ufo.w < -100)) {
       ufo = null;
-      lastUfoSpawn = performance.now();
-      barriers = createBarriers();
-      score = 0;
-      lives = 3;
-      level = 1;
-      fireCooldown = 0;
-      gameOver = false;
-      win = false;
-      paused = false;
-      boss = null;
-      setupWave();
-      updateHud();
+    }
+  }
+
+  function rectsIntersect(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  function spawnExplosion(x, y, color = '#ffd166', count = 14) {
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 5.5,
+        vy: (Math.random() - 0.5) * 5.5,
+        life: 28 + Math.random() * 16,
+        size: 2 + Math.random() * 3.5,
+        color,
+      });
+    }
+  }
+
+  function shootPlayer() {
+    bullets.push({ x: player.x + player.w / 2 - 2.5, y: player.y - 14, w: 5, h: 14, speed: 9 });
+    fireCooldown = 11;
+    beep(780, 0.04, 'square', 0.02);
+  }
+
+  function enemyShoot(x, y, speed = 4.2) {
+    enemyBullets.push({ x, y, w: 4, h: 14, speed });
+    beep(190, 0.05, 'sawtooth', 0.014);
+  }
+
+  function updateEnemies() {
+    const living = enemies.filter(e => e.alive);
+    let hitEdge = false;
+
+    const baseWaveSpeed = 0.6 + (level - 1) * 0.18;
+    const acceleration = (50 - living.length) * (0.018 + level * 0.0015);
+    enemySpeed = baseWaveSpeed + acceleration;
+
+    for (const e of living) {
+      e.x += enemyDirection * enemySpeed;
+      if (e.x <= 12 || e.x + e.w >= canvas.width - 12) hitEdge = true;
+      if (e.flash > 0) e.flash--;
     }
 
-    function setupWave() {
-      enemies = [];
-      boss = null;
-      const rows = 5;
-      const cols = 10;
-      const enemyW = 48;
-      const enemyH = 26;
-      const padX = 16;
-      const padY = 16;
-      const startX = 105;
-      const startY = 75;
-
-      const isBossLevel = level % 3 === 0;
-
-      if (!isBossLevel) {
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
-            enemies.push({
-              x: startX + c * (enemyW + padX),
-              y: startY + r * (enemyH + padY),
-              w: enemyW,
-              h: enemyH,
-              row: r,
-              alive: true,
-              flash: 0,
-            });
-          }
-        }
-      } else {
-        const bossTier = Math.floor(level / 3);
-        boss = {
-          x: canvas.width / 2 - 100,
-          y: 90,
-          w: 200,
-          h: 90,
-          hp: 34 + bossTier * 16,
-          maxHp: 34 + bossTier * 16,
-          speed: 2.6 + bossTier * 0.35,
-          dir: 1,
-          alive: true,
-          cooldown: Math.max(18, 42 - bossTier * 3),
-        };
-      }
-
-      enemyDirection = 1;
-      enemySpeed = 0.6 + (level - 1) * 0.18;
-      enemyDropDistance = 16 + Math.min(8, Math.floor(level / 2));
-      lastEnemyShot = 0;
-      bullets = [];
-      enemyBullets = [];
-      barriers = createBarriers();
-      lastUfoSpawn = performance.now() - 12000;
-      updateHud();
+    if (hitEdge) {
+      enemyDirection *= -1;
+      for (const e of living) e.y += enemyDropDistance;
     }
 
-    function createBarriers() {
-      const blocks = [];
-      const shape = ['  xxxx  ', ' xxxxxx ', 'xxxxxxxx', 'xxx  xxx'];
-      const isBossLevel = level % 3 === 0;
-      const count = isBossLevel ? 3 : 4;
-      const size = 11;
-      const gap = count === 3 ? 220 : 165;
-      const start = count === 3 ? 140 : 92;
-
-      for (let b = 0; b < count; b++) {
-        const ox = start + b * gap;
-        const oy = canvas.height - 170;
-        for (let r = 0; r < shape.length; r++) {
-          for (let c = 0; c < shape[r].length; c++) {
-            if (shape[r][c] === 'x') {
-              blocks.push({ x: ox + c * size, y: oy + r * size, w: size - 1, h: size - 1, hp: isBossLevel ? 2 : 3 });
-            }
-          }
-        }
-      }
-      return blocks;
-    }
-
-    function rectsIntersect(a, b) {
-      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-    }
-
-    function spawnExplosion(x, y, color = '#ffd166', count = 14) {
-      for (let i = 0; i < count; i++) {
-        particles.push({
-          x, y,
-          vx: (Math.random() - 0.5) * 5.5,
-          vy: (Math.random() - 0.5) * 5.5,
-          life: 28 + Math.random() * 16,
-          size: 2 + Math.random() * 3.5,
-          color,
-        });
-      }
-    }
-
-    function shootPlayer() {
-      bullets.push({ x: player.x + player.w / 2 - 2.5, y: player.y - 14, w: 5, h: 14, speed: 9 });
-      fireCooldown = 11;
-      beep(780, 0.04, 'square', 0.02);
-    }
-
-    function enemyShoot(x, y, speed = 4.2) {
-      enemyBullets.push({ x, y, w: 4, h: 14, speed });
-      beep(190, 0.05, 'sawtooth', 0.014);
-    }
-
-    function update() {
-      if (gameOver || win || paused) return;
-
-      if (fireCooldown > 0) fireCooldown--;
-
-      if (keys['arrowleft'] || keys['a']) player.x -= player.speed;
-      if (keys['arrowright'] || keys['d']) player.x += player.speed;
-      player.x = Math.max(8, Math.min(canvas.width - player.w - 8, player.x));
-
-      if ((keys[' '] || keys['space']) && fireCooldown <= 0) shootPlayer();
-
-      bullets.forEach(b => b.y -= b.speed);
-      bullets = bullets.filter(b => b.y + b.h > 0);
-
-      enemyBullets.forEach(b => b.y += b.speed);
-      enemyBullets = enemyBullets.filter(b => b.y < canvas.height + 20);
-
-      if (boss && boss.alive) {
-        updateBoss();
-      } else {
-        updateEnemies();
-      }
-
-      maybeSpawnUfo();
-      updateUfo();
-
-      handlePlayerBulletHits();
-      handleEnemyBulletHits();
-      handleBarrierCollisions();
-      updateParticles();
-      checkEndStates();
-      if (score > highScore) {
-        highScore = score;
-        localStorage.setItem('space_invaders_highscore', String(highScore));
-      }
-      updateHud();
-    }
-
-    function updateEnemies() {
-      const living = enemies.filter(e => e.alive);
-      let hitEdge = false;
-
-      const baseWaveSpeed = 0.6 + (level - 1) * 0.18;
-      const acceleration = (50 - living.length) * (0.018 + level * 0.0015);
-      enemySpeed = baseWaveSpeed + acceleration;
-
+    const now = performance.now();
+    const shotInterval = Math.max(120, 1000 - level * 90 - (50 - living.length) * 10);
+    if (living.length && now - lastEnemyShot > shotInterval) {
+      const bottomByColumn = new Map();
       for (const e of living) {
-        e.x += enemyDirection * enemySpeed;
-        if (e.x <= 12 || e.x + e.w >= canvas.width - 12) hitEdge = true;
-        if (e.flash > 0) e.flash--;
+        const col = Math.round(e.x / 55);
+        if (!bottomByColumn.has(col) || e.y > bottomByColumn.get(col).y) bottomByColumn.set(col, e);
       }
-
-      if (hitEdge) {
-        enemyDirection *= -1;
-        for (const e of living) e.y += enemyDropDistance;
-      }
-
-      const now = performance.now();
-      const shotInterval = Math.max(120, 1000 - level * 90 - (50 - living.length) * 10);
-      if (living.length && now - lastEnemyShot > shotInterval) {
-        const bottomByColumn = new Map();
-        for (const e of living) {
-          const col = Math.round(e.x / 55);
-          if (!bottomByColumn.has(col) || e.y > bottomByColumn.get(col).y) bottomByColumn.set(col, e);
-        }
-        const shooters = Array.from(bottomByColumn.values());
-        const volleyCount = living.length < 12 ? 2 : 1;
-        for (let i = 0; i < volleyCount; i++) {
-          const shooter = shooters[Math.floor(Math.random() * shooters.length)];
-          if (shooter) enemyShoot(shooter.x + shooter.w / 2 - 2, shooter.y + shooter.h, 4 + level * 0.35 + (living.length < 12 ? 0.6 : 0));
-        }
-        lastEnemyShot = now;
-      }
-
-      playMarchSound(Math.min(760, 280 + (50 - living.length) * 10 + level * 16), 0.025);
-    }
-
-      if (hitEdge) {
-        enemyDirection *= -1;
-        for (const e of living) e.y += enemyDropDistance;
-      }
-
-      const now = performance.now();
-      if (living.length && now - lastEnemyShot > Math.max(260, 1100 - level * 170 - living.length * 6)) {
-        const bottomByColumn = new Map();
-        for (const e of living) {
-          const col = Math.round(e.x / 55);
-          if (!bottomByColumn.has(col) || e.y > bottomByColumn.get(col).y) bottomByColumn.set(col, e);
-        }
-        const shooters = Array.from(bottomByColumn.values());
+      const shooters = Array.from(bottomByColumn.values());
+      const volleyCount = living.length < 12 ? 2 : 1;
+      for (let i = 0; i < volleyCount; i++) {
         const shooter = shooters[Math.floor(Math.random() * shooters.length)];
-        if (shooter) {
-          enemyShoot(shooter.x + shooter.w / 2 - 2, shooter.y + shooter.h, 4 + level * 0.25);
-          lastEnemyShot = now;
+        if (shooter) enemyShoot(shooter.x + shooter.w / 2 - 2, shooter.y + shooter.h, 4 + level * 0.35 + (living.length < 12 ? 0.6 : 0));
+      }
+      lastEnemyShot = now;
+    }
+
+    playMarchSound(Math.min(760, 280 + (50 - living.length) * 10 + level * 16), 0.025);
+  }
+
+  function updateBoss() {
+    boss.x += boss.speed * boss.dir;
+    if (boss.x <= 20 || boss.x + boss.w >= canvas.width - 20) boss.dir *= -1;
+    boss.cooldown--;
+
+    if (boss.cooldown <= 0) {
+      enemyShoot(boss.x + 30, boss.y + boss.h, 5.4 + level * 0.12);
+      enemyShoot(boss.x + boss.w / 2, boss.y + boss.h + 8, 6 + level * 0.14);
+      enemyShoot(boss.x + boss.w - 34, boss.y + boss.h, 5.4 + level * 0.12);
+      if (level >= 6) {
+        enemyShoot(boss.x + boss.w / 2 - 55, boss.y + boss.h - 4, 5.2 + level * 0.12);
+        enemyShoot(boss.x + boss.w / 2 + 55, boss.y + boss.h - 4, 5.2 + level * 0.12);
+      }
+      boss.cooldown = Math.max(12, 34 - Math.floor(level / 2));
+    }
+  }
+
+  function handlePlayerBulletHits() {
+    for (const b of bullets) {
+      if (ufo && rectsIntersect(b, ufo)) {
+        const bonus = ufo.points;
+        score += bonus;
+        spawnExplosion(ufo.x + ufo.w / 2, ufo.y + ufo.h / 2, '#ff5d8f', 24);
+        beep(920, 0.08, 'square', 0.03);
+        b.y = -999;
+        particles.push({ x: ufo.x + ufo.w / 2, y: ufo.y - 8, vx: 0, vy: -0.35, life: 55, size: bonus, color: '#ffffff', text: `+${bonus}` });
+        ufo = null;
+        continue;
+      }
+
+      if (boss && boss.alive && rectsIntersect(b, boss)) {
+        boss.hp -= 1;
+        b.y = -999;
+        score += 8;
+        spawnExplosion(b.x, b.y, '#c084fc', 6);
+        beep(260 + boss.hp * 4, 0.03, 'triangle', 0.02);
+        if (boss.hp <= 0) {
+          boss.alive = false;
+          score += 500 + level * 40;
+          spawnExplosion(boss.x + boss.w / 2, boss.y + boss.h / 2, '#c084fc', 50);
+          beep(120, 0.18, 'sawtooth', 0.04);
         }
+        continue;
       }
-    }
 
-    function updateBoss() {
-      boss.x += boss.speed * boss.dir;
-      if (boss.x <= 20 || boss.x + boss.w >= canvas.width - 20) boss.dir *= -1;
-      boss.cooldown--;
-
-      if (boss.cooldown <= 0) {
-        enemyShoot(boss.x + 30, boss.y + boss.h, 5.2);
-        enemyShoot(boss.x + boss.w / 2, boss.y + boss.h + 8, 5.8);
-        enemyShoot(boss.x + boss.w - 34, boss.y + boss.h, 5.2);
-        boss.cooldown = 38;
-      }
-    }
-
-    let lastMarchBeep = 0;
-    function playMarchSound(freq = 380, duration = 0.025) {
-      const now = performance.now();
-      const living = enemies ? enemies.filter(e => e.alive).length : 50;
-      const interval = Math.max(70, 260 - (50 - living) * 4 - level * 6);
-      if (now - lastMarchBeep < interval) return;
-      lastMarchBeep = now;
-      beep(freq, duration, 'square', 0.01);
-    }
-    }
-
-    function handlePlayerBulletHits() {
-      for (const b of bullets) {
-        if (ufo && rectsIntersect(b, ufo)) {
-          const bonus = ufo.points;
-          score += bonus;
-          spawnExplosion(ufo.x + ufo.w / 2, ufo.y + ufo.h / 2, '#ff5d8f', 24);
-          beep(920, 0.08, 'square', 0.03);
+      for (const e of enemies) {
+        if (e.alive && rectsIntersect(b, e)) {
+          e.alive = false;
+          e.flash = 4;
           b.y = -999;
-          particles.push({ x: ufo.x + ufo.w / 2, y: ufo.y - 8, vx: 0, vy: -0.35, life: 55, size: bonus, color: '#ffffff', text: `+${bonus}` });
-          ufo = null;
-          continue;
-        }
-
-        if (boss && boss.alive && rectsIntersect(b, boss)) {
-          boss.hp -= 1;
-          b.y = -999;
-          score += 8;
-          spawnExplosion(b.x, b.y, '#c084fc', 6);
-          beep(260 + boss.hp * 4, 0.03, 'triangle', 0.02);
-          if (boss.hp <= 0) {
-            boss.alive = false;
-            score += 500;
-            spawnExplosion(boss.x + boss.w / 2, boss.y + boss.h / 2, '#c084fc', 50);
-            beep(120, 0.18, 'sawtooth', 0.04);
-          }
-          continue;
-        }
-
-        for (const e of enemies) {
-          if (e.alive && rectsIntersect(b, e)) {
-            e.alive = false;
-            e.flash = 4;
-            b.y = -999;
-            score += 14 + (4 - e.row) * 3;
-            enemySpeed += 0.018;
-            spawnExplosion(e.x + e.w / 2, e.y + e.h / 2, e.row < 2 ? '#ff7aa2' : e.row < 4 ? '#ffd166' : '#73ffa9', 12);
-            beep(280 + (4 - e.row) * 80, 0.04, 'square', 0.02);
-            break;
-          }
+          score += 14 + (4 - e.row) * 3;
+          spawnExplosion(e.x + e.w / 2, e.y + e.h / 2, e.row < 2 ? '#ff7aa2' : e.row < 4 ? '#ffd166' : '#73ffa9', 12);
+          beep(280 + (4 - e.row) * 80, 0.04, 'square', 0.02);
+          break;
         }
       }
-      bullets = bullets.filter(b => b.y > -100);
     }
+    bullets = bullets.filter(b => b.y > -100);
+  }
 
-    function handleEnemyBulletHits() {
-      for (const b of enemyBullets) {
-        if (rectsIntersect(b, player)) {
+  function handleEnemyBulletHits() {
+    for (const b of enemyBullets) {
+      if (rectsIntersect(b, player)) {
+        b.y = canvas.height + 100;
+        lives -= 1;
+        spawnExplosion(player.x + player.w / 2, player.y + player.h / 2, '#6ee7ff', 24);
+        beep(140, 0.12, 'sawtooth', 0.04);
+        player.x = canvas.width / 2 - player.w / 2;
+        if (lives <= 0) gameOver = true;
+      }
+    }
+    enemyBullets = enemyBullets.filter(b => b.y < canvas.height + 50);
+  }
+
+  function handleBarrierCollisions() {
+    for (const b of bullets) {
+      for (const block of barriers) {
+        if (block.hp > 0 && rectsIntersect(b, block)) {
+          block.hp -= 1;
+          b.y = -999;
+          spawnExplosion(b.x, b.y, '#9ae6b4', 4);
+          break;
+        }
+      }
+    }
+    bullets = bullets.filter(b => b.y > -100);
+
+    for (const b of enemyBullets) {
+      for (const block of barriers) {
+        if (block.hp > 0 && rectsIntersect(b, block)) {
+          block.hp -= 1;
           b.y = canvas.height + 100;
-          lives -= 1;
-          spawnExplosion(player.x + player.w / 2, player.y + player.h / 2, '#6ee7ff', 24);
-          beep(140, 0.12, 'sawtooth', 0.04);
-          player.x = canvas.width / 2 - player.w / 2;
-          if (lives <= 0) gameOver = true;
+          spawnExplosion(b.x, b.y, '#f8fafc', 4);
+          break;
         }
-      }
-      enemyBullets = enemyBullets.filter(b => b.y < canvas.height + 50);
-    }
-
-    function handleBarrierCollisions() {
-      for (const b of bullets) {
-        for (const block of barriers) {
-          if (block.hp > 0 && rectsIntersect(b, block)) {
-            block.hp -= 1;
-            b.y = -999;
-            spawnExplosion(b.x, b.y, '#9ae6b4', 4);
-            break;
-          }
-        }
-      }
-      bullets = bullets.filter(b => b.y > -100);
-
-      for (const b of enemyBullets) {
-        for (const block of barriers) {
-          if (block.hp > 0 && rectsIntersect(b, block)) {
-            block.hp -= 1;
-            b.y = canvas.height + 100;
-            spawnExplosion(b.x, b.y, '#f8fafc', 4);
-            break;
-          }
-        }
-      }
-
-      if (boss && boss.alive) {
-        for (const block of barriers) {
-          if (rectsIntersect(block, boss)) block.hp = 0;
-        }
-      } else {
-        for (const e of enemies) {
-          if (!e.alive) continue;
-          for (const block of barriers) {
-            if (block.hp > 0 && rectsIntersect(e, block)) block.hp = 0;
-          }
-        }
-      }
-
-      barriers = barriers.filter(block => block.hp > 0);
-      enemyBullets = enemyBullets.filter(b => b.y < canvas.height + 50);
-    }
-
-    function updateParticles() {
-      for (const p of particles) {
-        p.x += p.vx || 0;
-        p.y += p.vy || 0;
-        p.vx = (p.vx || 0) * 0.98;
-        p.vy = (p.vy || 0) * 0.98;
-        p.life -= 1;
-      }
-      particles = particles.filter(p => p.life > 0);
-    }
-
-    function checkEndStates() {
-      if (boss && boss.alive) {
-        if (boss.y + boss.h >= player.y - 8) gameOver = true;
-        if (!boss.alive) win = true;
-        return;
-      }
-
-      const living = enemies.filter(e => e.alive);
-      if (living.some(e => e.y + e.h >= player.y - 6)) gameOver = true;
-      if (living.length === 0) {
-        level += 1;
-        if (level > 3) win = true;
-        else setupWave();
       }
     }
 
-    function drawBackground() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      g.addColorStop(0, '#030816');
-      g.addColorStop(1, '#071523');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      for (const s of stars) {
-        s.y += s.s;
-        if (s.y > canvas.height) {
-          s.y = -2;
-          s.x = Math.random() * canvas.width;
-        }
-        ctx.beginPath();
-        ctx.globalAlpha = s.a;
-        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
+    if (boss && boss.alive) {
+      for (const block of barriers) {
+        if (rectsIntersect(block, boss)) block.hp = 0;
       }
-      ctx.globalAlpha = 1;
-
-      ctx.fillStyle = 'rgba(110, 231, 255, 0.08)';
-      ctx.fillRect(0, canvas.height - 95, canvas.width, 3);
-    }
-
-    function drawPlayer() {
-      ctx.save();
-      ctx.translate(player.x, player.y);
-      ctx.fillStyle = '#6ee7ff';
-      ctx.fillRect(0, 10, player.w, 14);
-      ctx.fillRect(21, 0, 14, 10);
-      ctx.fillRect(8, 8, 8, 8);
-      ctx.fillRect(player.w - 16, 8, 8, 8);
-      ctx.restore();
-    }
-
-    function drawEnemies() {
+    } else {
       for (const e of enemies) {
         if (!e.alive) continue;
-        ctx.save();
-        ctx.translate(e.x, e.y);
-        ctx.fillStyle = e.row < 2 ? '#ff7aa2' : e.row < 4 ? '#ffd166' : '#73ffa9';
-        ctx.fillRect(4, 6, e.w - 8, e.h - 10);
-        ctx.fillRect(0, 12, 8, 8);
-        ctx.fillRect(e.w - 8, 12, 8, 8);
-        ctx.clearRect(12, 12, 6, 6);
-        ctx.clearRect(e.w - 18, 12, 6, 6);
-        ctx.fillRect(10, e.h - 6, 6, 6);
-        ctx.fillRect(e.w - 16, e.h - 6, 6, 6);
-        ctx.restore();
-      }
-    }
-
-    function drawUfo() {
-      if (!ufo) return;
-      ctx.save();
-      ctx.translate(ufo.x, ufo.y);
-      ctx.fillStyle = '#ff5d8f';
-      ctx.fillRect(14, 10, ufo.w - 28, 12);
-      ctx.fillRect(0, 14, 18, 8);
-      ctx.fillRect(ufo.w - 18, 14, 18, 8);
-      ctx.fillRect(24, 2, ufo.w - 48, 10);
-      ctx.clearRect(18, 14, 8, 5);
-      ctx.clearRect(ufo.w - 26, 14, 8, 5);
-      ctx.restore();
-    }
-
-    function drawBoss() {
-      if (!boss || !boss.alive) return;
-      ctx.save();
-      ctx.translate(boss.x, boss.y);
-      ctx.fillStyle = '#a855f7';
-      ctx.fillRect(18, 16, boss.w - 36, boss.h - 28);
-      ctx.fillRect(0, 34, 30, 24);
-      ctx.fillRect(boss.w - 30, 34, 30, 24);
-      ctx.fillRect(74, 0, boss.w - 148, 24);
-      ctx.clearRect(48, 34, 18, 14);
-      ctx.clearRect(boss.w - 66, 34, 18, 14);
-      ctx.fillStyle = '#e9d5ff';
-      ctx.fillRect(80, boss.h - 18, boss.w - 160, 10);
-      ctx.restore();
-
-      const barW = 240;
-      const x = canvas.width / 2 - barW / 2;
-      const y = 28;
-      ctx.fillStyle = 'rgba(255,255,255,0.15)';
-      ctx.fillRect(x, y, barW, 12);
-      ctx.fillStyle = '#c084fc';
-      ctx.fillRect(x, y, barW * (boss.hp / boss.maxHp), 12);
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-      ctx.strokeRect(x, y, barW, 12);
-    }
-
-    function drawBullets() {
-      ctx.fillStyle = '#ffd166';
-      bullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
-      ctx.fillStyle = '#f8fafc';
-      enemyBullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
-    }
-
-    function drawBarriers() {
-      for (const block of barriers) {
-        ctx.fillStyle = block.hp === 3 ? '#86efac' : block.hp === 2 ? '#4ade80' : '#166534';
-        ctx.fillRect(block.x, block.y, block.w, block.h);
-      }
-    }
-
-    function drawParticles() {
-      for (const p of particles) {
-        ctx.globalAlpha = Math.max(0, p.life / 55);
-        if (p.text) {
-          ctx.fillStyle = p.color;
-          ctx.font = 'bold 20px Arial';
-          ctx.fillText(p.text, p.x, p.y);
-        } else {
-          ctx.fillStyle = p.color;
-          ctx.fillRect(p.x, p.y, p.size, p.size);
+        for (const block of barriers) {
+          if (block.hp > 0 && rectsIntersect(e, block)) block.hp = 0;
         }
       }
-      ctx.globalAlpha = 1;
     }
 
-    function drawOverlay() {
-      if (!paused && !gameOver && !win) {
-        drawStartHint();
-        return;
+    barriers = barriers.filter(block => block.hp > 0);
+    enemyBullets = enemyBullets.filter(b => b.y < canvas.height + 50);
+  }
+
+  function updateParticles() {
+    for (const p of particles) {
+      p.x += p.vx || 0;
+      p.y += p.vy || 0;
+      p.vx = (p.vx || 0) * 0.98;
+      p.vy = (p.vy || 0) * 0.98;
+      p.life -= 1;
+    }
+    particles = particles.filter(p => p.life > 0);
+  }
+
+  function checkEndStates() {
+    if (boss && boss.alive) {
+      if (boss.y + boss.h >= player.y - 8) gameOver = true;
+      return;
+    }
+
+    const living = enemies.filter(e => e.alive);
+    if (living.some(e => e.y + e.h >= player.y - 6)) gameOver = true;
+    if (!gameOver && ((boss && !boss.alive) || living.length === 0)) {
+      level += 1;
+      setupWave();
+    }
+  }
+
+  function drawBackground() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    g.addColorStop(0, '#030816');
+    g.addColorStop(1, '#071523');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (const s of stars) {
+      s.y += s.s;
+      if (s.y > canvas.height) {
+        s.y = -2;
+        s.x = Math.random() * canvas.width;
       }
-      ctx.fillStyle = 'rgba(3,8,22,0.74)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.textAlign = 'center';
-      ctx.fillStyle = '#ecf5ff';
-      ctx.font = 'bold 44px Arial';
-      const title = paused ? 'Paused' : win ? 'You Win!' : 'Game Over';
-      ctx.fillText(title, canvas.width / 2, canvas.height / 2 - 30);
-      ctx.font = '22px Arial';
-      if (!paused) ctx.fillText('Press Enter to restart', canvas.width / 2, canvas.height / 2 + 16);
-      if (paused) ctx.fillText('Press P to continue', canvas.width / 2, canvas.height / 2 + 16);
+      ctx.beginPath();
+      ctx.globalAlpha = s.a;
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
     }
+    ctx.globalAlpha = 1;
 
-    function drawStartHint() {
-      if (score !== 0 || level !== 1 || bullets.length || enemyBullets.length) return;
-      ctx.textAlign = 'center';
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.font = 'bold 24px Arial';
-      ctx.fillText('Press Space to fire and start the battle', canvas.width / 2, canvas.height - 28);
+    ctx.fillStyle = 'rgba(110, 231, 255, 0.08)';
+    ctx.fillRect(0, canvas.height - 95, canvas.width, 3);
+  }
+
+  function drawPlayer() {
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.fillStyle = '#6ee7ff';
+    ctx.fillRect(0, 10, player.w, 14);
+    ctx.fillRect(21, 0, 14, 10);
+    ctx.fillRect(8, 8, 8, 8);
+    ctx.fillRect(player.w - 16, 8, 8, 8);
+    ctx.restore();
+  }
+
+  function drawEnemies() {
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      ctx.save();
+      ctx.translate(e.x, e.y);
+      ctx.fillStyle = e.row < 2 ? '#ff7aa2' : e.row < 4 ? '#ffd166' : '#73ffa9';
+      ctx.fillRect(4, 6, e.w - 8, e.h - 10);
+      ctx.fillRect(0, 12, 8, 8);
+      ctx.fillRect(e.w - 8, 12, 8, 8);
+      ctx.clearRect(12, 12, 6, 6);
+      ctx.clearRect(e.w - 18, 12, 6, 6);
+      ctx.fillRect(10, e.h - 6, 6, 6);
+      ctx.fillRect(e.w - 16, e.h - 6, 6, 6);
+      ctx.restore();
     }
+  }
 
-    function draw() {
-      drawBackground();
-      drawBarriers();
-      if (ufo) drawUfo();
-      if (boss && boss.alive) drawBoss();
-      else drawEnemies();
-      drawPlayer();
-      drawBullets();
-      drawParticles();
-      drawOverlay();
+  function drawUfo() {
+    if (!ufo) return;
+    ctx.save();
+    ctx.translate(ufo.x, ufo.y);
+    ctx.fillStyle = '#ff5d8f';
+    ctx.fillRect(14, 10, ufo.w - 28, 12);
+    ctx.fillRect(0, 14, 18, 8);
+    ctx.fillRect(ufo.w - 18, 14, 18, 8);
+    ctx.fillRect(24, 2, ufo.w - 48, 10);
+    ctx.clearRect(18, 14, 8, 5);
+    ctx.clearRect(ufo.w - 26, 14, 8, 5);
+    ctx.restore();
+  }
+
+  function drawBoss() {
+    if (!boss || !boss.alive) return;
+    ctx.save();
+    ctx.translate(boss.x, boss.y);
+    ctx.fillStyle = '#a855f7';
+    ctx.fillRect(18, 16, boss.w - 36, boss.h - 28);
+    ctx.fillRect(0, 34, 30, 24);
+    ctx.fillRect(boss.w - 30, 34, 30, 24);
+    ctx.fillRect(74, 0, boss.w - 148, 24);
+    ctx.clearRect(48, 34, 18, 14);
+    ctx.clearRect(boss.w - 66, 34, 18, 14);
+    ctx.fillStyle = '#e9d5ff';
+    ctx.fillRect(80, boss.h - 18, boss.w - 160, 10);
+    ctx.restore();
+
+    const barW = 240;
+    const x = canvas.width / 2 - barW / 2;
+    const y = 28;
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillRect(x, y, barW, 12);
+    ctx.fillStyle = '#c084fc';
+    ctx.fillRect(x, y, barW * (boss.hp / boss.maxHp), 12);
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.strokeRect(x, y, barW, 12);
+  }
+
+  function drawBullets() {
+    ctx.fillStyle = '#ffd166';
+    bullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
+    ctx.fillStyle = '#f8fafc';
+    enemyBullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
+  }
+
+  function drawBarriers() {
+    for (const block of barriers) {
+      ctx.fillStyle = block.hp === 3 ? '#86efac' : block.hp === 2 ? '#4ade80' : '#166534';
+      ctx.fillRect(block.x, block.y, block.w, block.h);
     }
+  }
 
-    function loop(timestamp = 0) {
-      lastTime = timestamp;
-      update();
-      draw();
-      requestAnimationFrame(loop);
+  function drawParticles() {
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life / 55);
+      if (p.text) {
+        ctx.fillStyle = p.color;
+        ctx.font = 'bold 20px Arial';
+        ctx.fillText(p.text, p.x, p.y);
+      } else {
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, p.size, p.size);
+      }
     }
+    ctx.globalAlpha = 1;
+  }
 
-    resetGame();
-    highscoreEl.textContent = highScore;
+  function drawOverlay() {
+    if (!paused && !gameOver) {
+      drawStartHint();
+      return;
+    }
+    ctx.fillStyle = 'rgba(3,8,22,0.74)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ecf5ff';
+    ctx.font = 'bold 44px Arial';
+    const title = paused ? 'Paused' : 'Game Over';
+    ctx.fillText(title, canvas.width / 2, canvas.height / 2 - 30);
+    ctx.font = '22px Arial';
+    if (!paused) ctx.fillText('Press Enter to restart', canvas.width / 2, canvas.height / 2 + 16);
+    if (paused) ctx.fillText('Press P to continue', canvas.width / 2, canvas.height / 2 + 16);
+  }
+
+  function drawStartHint() {
+    if (score !== 0 || level !== 1 || bullets.length || enemyBullets.length) return;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.font = 'bold 24px Arial';
+    ctx.fillText('Press Space or 🔥 to start the battle', canvas.width / 2, canvas.height - 28);
+  }
+
+  function draw() {
+    drawBackground();
+    drawBarriers();
+    if (ufo) drawUfo();
+    if (boss && boss.alive) drawBoss();
+    else drawEnemies();
+    drawPlayer();
+    drawBullets();
+    drawParticles();
+    drawOverlay();
+  }
+
+  function update() {
+    if (gameOver || paused) return;
+
+    if (fireCooldown > 0) fireCooldown--;
+
+    if (keys['arrowleft'] || keys['a']) player.x -= player.speed;
+    if (keys['arrowright'] || keys['d']) player.x += player.speed;
+    player.x = Math.max(8, Math.min(canvas.width - player.w - 8, player.x));
+
+    if ((keys[' '] || keys['space']) && fireCooldown <= 0) shootPlayer();
+
+    bullets.forEach(b => b.y -= b.speed);
+    bullets = bullets.filter(b => b.y + b.h > 0);
+
+    enemyBullets.forEach(b => b.y += b.speed);
+    enemyBullets = enemyBullets.filter(b => b.y < canvas.height + 20);
+
+    if (boss && boss.alive) updateBoss();
+    else updateEnemies();
+
+    maybeSpawnUfo();
+    updateUfo();
+
+    handlePlayerBulletHits();
+    handleEnemyBulletHits();
+    handleBarrierCollisions();
+    updateParticles();
+    checkEndStates();
+
+    if (score > highScore) {
+      highScore = score;
+      localStorage.setItem('space_invaders_highscore', String(highScore));
+    }
+    updateHud();
+  }
+
+  function loop(timestamp = 0) {
+    lastTime = timestamp;
+    update();
+    draw();
     requestAnimationFrame(loop);
-  </script>
+  }
+
+  resetGame();
+  highscoreEl.textContent = highScore;
+  requestAnimationFrame(loop);
+</script>
 </body>
 </html>
