@@ -287,19 +287,20 @@
     }
 
     function maybeSpawnUfo() {
-      if (ufo || boss && boss.alive || gameOver || win) return;
+      if (ufo || (boss && boss.alive) || gameOver || win) return;
       const now = performance.now();
-      const minDelay = 12000;
+      const minDelay = Math.max(7000, 13000 - level * 400);
       if (now - lastUfoSpawn < minDelay) return;
-      if (Math.random() < 0.0022) {
+      const spawnChance = Math.min(0.01, 0.003 + level * 0.0008);
+      if (Math.random() < spawnChance) {
         const fromLeft = Math.random() < 0.5;
         ufo = {
           x: fromLeft ? -90 : canvas.width + 90,
           y: 34,
           w: 72,
           h: 28,
-          speed: fromLeft ? 3.2 : -3.2,
-          points: [50, 100, 150, 200][Math.floor(Math.random() * 4)],
+          speed: fromLeft ? 3.2 + level * 0.18 : -(3.2 + level * 0.18),
+          points: [100, 150, 200, 300][Math.floor(Math.random() * 4)],
         };
         lastUfoSpawn = now;
         beep(520, 0.07, 'triangle', 0.018);
@@ -361,7 +362,9 @@
       const startX = 105;
       const startY = 75;
 
-      if (level < 3) {
+      const isBossLevel = level % 3 === 0;
+
+      if (!isBossLevel) {
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             enemies.push({
@@ -376,34 +379,37 @@
           }
         }
       } else {
+        const bossTier = Math.floor(level / 3);
         boss = {
           x: canvas.width / 2 - 100,
           y: 90,
           w: 200,
           h: 90,
-          hp: 45,
-          maxHp: 45,
-          speed: 2.8,
+          hp: 34 + bossTier * 16,
+          maxHp: 34 + bossTier * 16,
+          speed: 2.6 + bossTier * 0.35,
           dir: 1,
           alive: true,
-          cooldown: 0,
+          cooldown: Math.max(18, 42 - bossTier * 3),
         };
       }
 
       enemyDirection = 1;
-      enemySpeed = 0.55 + (level - 1) * 0.22;
-      enemyDropDistance = 16;
+      enemySpeed = 0.6 + (level - 1) * 0.18;
+      enemyDropDistance = 16 + Math.min(8, Math.floor(level / 2));
       lastEnemyShot = 0;
       bullets = [];
       enemyBullets = [];
       barriers = createBarriers();
+      lastUfoSpawn = performance.now() - 12000;
       updateHud();
     }
 
     function createBarriers() {
       const blocks = [];
       const shape = ['  xxxx  ', ' xxxxxx ', 'xxxxxxxx', 'xxx  xxx'];
-      const count = level === 3 ? 3 : 4;
+      const isBossLevel = level % 3 === 0;
+      const count = isBossLevel ? 3 : 4;
       const size = 11;
       const gap = count === 3 ? 220 : 165;
       const start = count === 3 ? 140 : 92;
@@ -414,7 +420,7 @@
         for (let r = 0; r < shape.length; r++) {
           for (let c = 0; c < shape[r].length; c++) {
             if (shape[r][c] === 'x') {
-              blocks.push({ x: ox + c * size, y: oy + r * size, w: size - 1, h: size - 1, hp: 3 });
+              blocks.push({ x: ox + c * size, y: oy + r * size, w: size - 1, h: size - 1, hp: isBossLevel ? 2 : 3 });
             }
           }
         }
@@ -492,6 +498,10 @@
       const living = enemies.filter(e => e.alive);
       let hitEdge = false;
 
+      const baseWaveSpeed = 0.6 + (level - 1) * 0.18;
+      const acceleration = (50 - living.length) * (0.018 + level * 0.0015);
+      enemySpeed = baseWaveSpeed + acceleration;
+
       for (const e of living) {
         e.x += enemyDirection * enemySpeed;
         if (e.x <= 12 || e.x + e.w >= canvas.width - 12) hitEdge = true;
@@ -504,23 +514,23 @@
       }
 
       const now = performance.now();
-      if (living.length && now - lastEnemyShot > Math.max(260, 1100 - level * 170 - living.length * 6)) {
+      const shotInterval = Math.max(120, 1000 - level * 90 - (50 - living.length) * 10);
+      if (living.length && now - lastEnemyShot > shotInterval) {
         const bottomByColumn = new Map();
         for (const e of living) {
           const col = Math.round(e.x / 55);
           if (!bottomByColumn.has(col) || e.y > bottomByColumn.get(col).y) bottomByColumn.set(col, e);
         }
         const shooters = Array.from(bottomByColumn.values());
-        const shooter = shooters[Math.floor(Math.random() * shooters.length)];
-        if (shooter) {
-          enemyShoot(shooter.x + shooter.w / 2 - 2, shooter.y + shooter.h, 4 + level * 0.25);
-          lastEnemyShot = now;
+        const volleyCount = living.length < 12 ? 2 : 1;
+        for (let i = 0; i < volleyCount; i++) {
+          const shooter = shooters[Math.floor(Math.random() * shooters.length)];
+          if (shooter) enemyShoot(shooter.x + shooter.w / 2 - 2, shooter.y + shooter.h, 4 + level * 0.35 + (living.length < 12 ? 0.6 : 0));
         }
+        lastEnemyShot = now;
       }
 
-      if (living.length <= 12) {
-        playMarchSound(420, 0.03);
-      }
+      playMarchSound(Math.min(760, 280 + (50 - living.length) * 10 + level * 16), 0.025);
     }
 
       if (hitEdge) {
@@ -560,7 +570,9 @@
     let lastMarchBeep = 0;
     function playMarchSound(freq = 380, duration = 0.025) {
       const now = performance.now();
-      if (now - lastMarchBeep < 240) return;
+      const living = enemies ? enemies.filter(e => e.alive).length : 50;
+      const interval = Math.max(70, 260 - (50 - living) * 4 - level * 6);
+      if (now - lastMarchBeep < interval) return;
       lastMarchBeep = now;
       beep(freq, duration, 'square', 0.01);
     }
