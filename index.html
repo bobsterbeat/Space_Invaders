@@ -96,6 +96,77 @@
     .controls strong { color: var(--accent); }
     .tip { color: var(--muted); font-size: 14px; }
 
+    .overlay-ui {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(3,8,22,0.72);
+      z-index: 20;
+      padding: 18px;
+    }
+
+    .overlay-ui.show {
+      display: flex;
+    }
+
+    .overlay-panel {
+      width: min(420px, 100%);
+      background: rgba(12,18,36,0.96);
+      border: 1px solid rgba(181,207,255,0.2);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+      text-align: center;
+    }
+
+    .overlay-title {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .overlay-score {
+      color: var(--muted);
+      margin-bottom: 14px;
+      font-size: 16px;
+    }
+
+    .arcade-btn {
+      border: 0;
+      border-radius: 12px;
+      padding: 12px 18px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      background: linear-gradient(135deg, #6ee7ff, #7c3aed);
+      color: #06101d;
+      min-width: 150px;
+    }
+
+    .initials-row {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      align-items: center;
+      margin: 12px 0 16px;
+      flex-wrap: wrap;
+    }
+
+    .initials-input {
+      width: 90px;
+      text-transform: uppercase;
+      text-align: center;
+      border-radius: 10px;
+      border: 1px solid rgba(181,207,255,0.25);
+      background: #0b1730;
+      color: #e8f1ff;
+      padding: 10px 12px;
+      font-size: 20px;
+      letter-spacing: 0.2em;
+    }
+
     @media (max-width: 760px) {
       body {
         padding: 8px;
@@ -149,6 +220,14 @@
         padding: 14px 18px !important;
         min-width: 64px;
       }
+
+      #leaderboardCard {
+        margin-bottom: 8px !important;
+      }
+
+      .overlay-title {
+        font-size: 24px;
+      }
     }
   </style>
 </head>
@@ -160,6 +239,11 @@
       <div class="card"><div class="label">Level</div><div class="value" id="level">1</div></div>
       <div class="card"><div class="label">High Score</div><div class="value" id="highscore">0</div></div>
       <div class="card"><div class="label">Boss</div><div class="value" id="boss">No</div></div>
+    </div>
+
+    <div class="card" id="leaderboardCard" style="margin-bottom:12px;">
+      <div class="label">Top Pilots</div>
+      <div id="leaderboardList" style="margin-top:8px; font-size:14px; line-height:1.6; color:#e8f1ff;">No scores yet.</div>
     </div>
 
     <canvas id="game" width="900" height="675"></canvas>
@@ -188,6 +272,21 @@
     </div>
   </div>
 
+  <div class="overlay-ui" id="overlayUI">
+    <div class="overlay-panel">
+      <div class="overlay-title" id="overlayTitle">Game Over</div>
+      <div class="overlay-score" id="overlayScore">Score: 0</div>
+      <div id="initialsSection" style="display:none;">
+        <div style="color:#9fb2d8; font-size:14px;">New high score — enter your initials</div>
+        <div class="initials-row">
+          <input id="initialsInput" class="initials-input" maxlength="3" value="AAA" />
+          <button id="saveScoreBtn" class="arcade-btn">Save Score</button>
+        </div>
+      </div>
+      <button id="restartBtn" class="arcade-btn">Play Again</button>
+    </div>
+  </div>
+
   <script>
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -197,6 +296,14 @@
   const levelEl = document.getElementById('level');
   const highscoreEl = document.getElementById('highscore');
   const bossEl = document.getElementById('boss');
+  const overlayUI = document.getElementById('overlayUI');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlayScore = document.getElementById('overlayScore');
+  const restartBtn = document.getElementById('restartBtn');
+  const initialsSection = document.getElementById('initialsSection');
+  const initialsInput = document.getElementById('initialsInput');
+  const saveScoreBtn = document.getElementById('saveScoreBtn');
+  const leaderboardList = document.getElementById('leaderboardList');
 
   const keys = {};
   let audioReady = false;
@@ -208,6 +315,8 @@
   let lastUfoBeep = 0;
   let lastMarchBeep = 0;
   let highScore = Number(localStorage.getItem('space_invaders_highscore') || 0);
+  let leaderboard = JSON.parse(localStorage.getItem('space_invaders_leaderboard') || '[]');
+  let pendingScore = null;
 
   function bindMobileControls() {
     const left = document.getElementById('leftBtn');
@@ -239,6 +348,14 @@
   }
 
   window.addEventListener('load', bindMobileControls);
+  restartBtn.addEventListener('click', () => {
+    hideOverlay();
+    resetGame();
+  });
+  saveScoreBtn.addEventListener('click', saveHighScore);
+  initialsInput.addEventListener('input', () => {
+    initialsInput.value = initialsInput.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+  });
 
   document.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
@@ -309,7 +426,62 @@
     bossEl.textContent = boss && boss.alive ? 'Yes' : 'No';
   }
 
+  function renderLeaderboard() {
+    if (!leaderboard.length) {
+      leaderboardList.textContent = 'No scores yet.';
+      return;
+    }
+    leaderboardList.innerHTML = leaderboard
+      .slice(0, 5)
+      .map((entry, index) => `${index + 1}. <strong>${entry.initials}</strong> — ${entry.score}`)
+      .join('<br>');
+  }
+
+  function qualifiesForLeaderboard(value) {
+    return leaderboard.length < 5 || value > leaderboard[leaderboard.length - 1].score;
+  }
+
+  function saveHighScore() {
+    if (pendingScore == null) return;
+    const initials = (initialsInput.value || 'AAA').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'AAA';
+    leaderboard.push({ initials, score: pendingScore });
+    leaderboard.sort((a, b) => b.score - a.score);
+    leaderboard = leaderboard.slice(0, 5);
+    localStorage.setItem('space_invaders_leaderboard', JSON.stringify(leaderboard));
+    highScore = Math.max(highScore, leaderboard[0]?.score || 0);
+    localStorage.setItem('space_invaders_highscore', String(highScore));
+    pendingScore = null;
+    renderLeaderboard();
+    initialsSection.style.display = 'none';
+    restartBtn.style.display = 'inline-block';
+    updateHud();
+  }
+
+  function showOverlay(title) {
+    overlayTitle.textContent = title;
+    overlayScore.textContent = `Score: ${score}`;
+    overlayUI.classList.add('show');
+    if (title === 'Game Over' && qualifiesForLeaderboard(score)) {
+      pendingScore = score;
+      initialsInput.value = 'AAA';
+      initialsSection.style.display = 'block';
+      restartBtn.style.display = 'none';
+      setTimeout(() => initialsInput.focus(), 50);
+    } else {
+      initialsSection.style.display = 'none';
+      restartBtn.style.display = 'inline-block';
+      pendingScore = null;
+    }
+  }
+
+  function hideOverlay() {
+    overlayUI.classList.remove('show');
+    initialsSection.style.display = 'none';
+    restartBtn.style.display = 'inline-block';
+  }
+
   function resetGame() {
+    hideOverlay();
     player = { x: canvas.width / 2 - 28, y: canvas.height - 62, w: 56, h: 24, speed: 7 };
     bullets = [];
     enemyBullets = [];
@@ -571,7 +743,10 @@
         spawnExplosion(player.x + player.w / 2, player.y + player.h / 2, '#6ee7ff', 24);
         beep(140, 0.12, 'sawtooth', 0.04);
         player.x = canvas.width / 2 - player.w / 2;
-        if (lives <= 0) gameOver = true;
+        if (lives <= 0) {
+          gameOver = true;
+          showOverlay('Game Over');
+        }
       }
     }
     enemyBullets = enemyBullets.filter(b => b.y < canvas.height + 50);
@@ -631,12 +806,18 @@
 
   function checkEndStates() {
     if (boss && boss.alive) {
-      if (boss.y + boss.h >= player.y - 8) gameOver = true;
+      if (boss.y + boss.h >= player.y - 8) {
+        gameOver = true;
+        showOverlay('Game Over');
+      }
       return;
     }
 
     const living = enemies.filter(e => e.alive);
-    if (living.some(e => e.y + e.h >= player.y - 6)) gameOver = true;
+    if (living.some(e => e.y + e.h >= player.y - 6)) {
+      gameOver = true;
+      showOverlay('Game Over');
+    }
     if (!gameOver && ((boss && !boss.alive) || living.length === 0)) {
       level += 1;
       setupWave();
@@ -772,16 +953,16 @@
       drawStartHint();
       return;
     }
-    ctx.fillStyle = 'rgba(3,8,22,0.74)';
+    ctx.fillStyle = 'rgba(3,8,22,0.5)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#ecf5ff';
-    ctx.font = 'bold 44px Arial';
-    const title = paused ? 'Paused' : 'Game Over';
-    ctx.fillText(title, canvas.width / 2, canvas.height / 2 - 30);
-    ctx.font = '22px Arial';
-    if (!paused) ctx.fillText('Press Enter to restart', canvas.width / 2, canvas.height / 2 + 16);
-    if (paused) ctx.fillText('Press P to continue', canvas.width / 2, canvas.height / 2 + 16);
+    if (paused) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ecf5ff';
+      ctx.font = 'bold 44px Arial';
+      ctx.fillText('Paused', canvas.width / 2, canvas.height / 2 - 30);
+      ctx.font = '22px Arial';
+      ctx.fillText('Press P to continue', canvas.width / 2, canvas.height / 2 + 16);
+    }
   }
 
   function drawStartHint() {
@@ -847,6 +1028,7 @@
     requestAnimationFrame(loop);
   }
 
+  renderLeaderboard();
   resetGame();
   highscoreEl.textContent = highScore;
   requestAnimationFrame(loop);
