@@ -249,6 +249,9 @@
     <canvas id="game" width="900" height="675"></canvas>
 
     <div class="controls">
+      <div class="card" style="text-align:center;">
+        <button id="startBtn" class="arcade-btn">Start Game</button>
+      </div>
       <div class="card keyboard-controls">
         <div><strong>Move:</strong> A / D or Arrow keys</div>
         <div><strong>Shoot:</strong> Space</div>
@@ -278,8 +281,25 @@
       <div class="overlay-score" id="overlayScore">Score: 0</div>
       <div id="initialsSection" style="display:none;">
         <div style="color:#9fb2d8; font-size:14px;">New high score — enter your initials</div>
-        <div class="initials-row">
-          <input id="initialsInput" class="initials-input" maxlength="3" value="AAA" />
+        <div class="initials-row" style="margin-top:14px; flex-direction:column;">
+          <div id="initialsDisplay" style="font-size:34px; letter-spacing:0.35em; font-weight:700;">AAA</div>
+          <div style="display:flex; gap:14px; justify-content:center; flex-wrap:wrap;">
+            <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+              <button class="arcade-btn letter-up" data-index="0" style="min-width:56px; padding:8px 10px;">▲</button>
+              <div id="letter0" style="font-size:26px; width:28px; text-align:center;">A</div>
+              <button class="arcade-btn letter-down" data-index="0" style="min-width:56px; padding:8px 10px;">▼</button>
+            </div>
+            <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+              <button class="arcade-btn letter-up" data-index="1" style="min-width:56px; padding:8px 10px;">▲</button>
+              <div id="letter1" style="font-size:26px; width:28px; text-align:center;">A</div>
+              <button class="arcade-btn letter-down" data-index="1" style="min-width:56px; padding:8px 10px;">▼</button>
+            </div>
+            <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+              <button class="arcade-btn letter-up" data-index="2" style="min-width:56px; padding:8px 10px;">▲</button>
+              <div id="letter2" style="font-size:26px; width:28px; text-align:center;">A</div>
+              <button class="arcade-btn letter-down" data-index="2" style="min-width:56px; padding:8px 10px;">▼</button>
+            </div>
+          </div>
           <button id="saveScoreBtn" class="arcade-btn">Save Score</button>
         </div>
       </div>
@@ -301,11 +321,13 @@
   const overlayScore = document.getElementById('overlayScore');
   const restartBtn = document.getElementById('restartBtn');
   const initialsSection = document.getElementById('initialsSection');
-  const initialsInput = document.getElementById('initialsInput');
   const saveScoreBtn = document.getElementById('saveScoreBtn');
   const leaderboardList = document.getElementById('leaderboardList');
+  const initialsDisplay = document.getElementById('initialsDisplay');
+  const letterEls = [document.getElementById('letter0'), document.getElementById('letter1'), document.getElementById('letter2')];
 
   const keys = {};
+  const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   let audioReady = false;
   let audioCtx;
 
@@ -317,6 +339,13 @@
   let highScore = Number(localStorage.getItem('space_invaders_highscore') || 0);
   let leaderboard = JSON.parse(localStorage.getItem('space_invaders_leaderboard') || '[]');
   let pendingScore = null;
+  let initialsChars = ['A', 'A', 'A'];
+  let gameStarted = false;
+  let enemyAnimFrame = 0;
+  let enemyAnimTimer = 0;
+  let combo = 0;
+  let comboTimer = 0;
+  let screenShake = 0;
 
   function bindMobileControls() {
     const left = document.getElementById('leftBtn');
@@ -353,9 +382,8 @@
     resetGame();
   });
   saveScoreBtn.addEventListener('click', saveHighScore);
-  initialsInput.addEventListener('input', () => {
-    initialsInput.value = initialsInput.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
-  });
+  document.querySelectorAll('.letter-up').forEach(btn => btn.addEventListener('click', () => stepInitial(Number(btn.dataset.index), 1)));
+  document.querySelectorAll('.letter-down').forEach(btn => btn.addEventListener('click', () => stepInitial(Number(btn.dataset.index), -1)));
 
   document.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
@@ -426,6 +454,18 @@
     bossEl.textContent = boss && boss.alive ? 'Yes' : 'No';
   }
 
+  function syncInitialsDisplay() {
+    initialsDisplay.textContent = initialsChars.join('');
+    initialsChars.forEach((ch, i) => letterEls[i].textContent = ch);
+  }
+
+  function stepInitial(index, delta) {
+    const current = LETTERS.indexOf(initialsChars[index]);
+    initialsChars[index] = LETTERS[(current + delta + LETTERS.length) % LETTERS.length];
+    syncInitialsDisplay();
+    beep(520 + index * 50, 0.03, 'square', 0.01);
+  }
+
   function renderLeaderboard() {
     if (!leaderboard.length) {
       leaderboardList.textContent = 'No scores yet.';
@@ -443,7 +483,7 @@
 
   function saveHighScore() {
     if (pendingScore == null) return;
-    const initials = (initialsInput.value || 'AAA').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'AAA';
+    const initials = initialsChars.join('');
     leaderboard.push({ initials, score: pendingScore });
     leaderboard.sort((a, b) => b.score - a.score);
     leaderboard = leaderboard.slice(0, 5);
@@ -463,10 +503,11 @@
     overlayUI.classList.add('show');
     if (title === 'Game Over' && qualifiesForLeaderboard(score)) {
       pendingScore = score;
-      initialsInput.value = 'AAA';
+      initialsChars = ['A', 'A', 'A'];
+      syncInitialsDisplay();
       initialsSection.style.display = 'block';
       restartBtn.style.display = 'none';
-      setTimeout(() => initialsInput.focus(), 50);
+      restartBtn.blur();
     } else {
       initialsSection.style.display = 'none';
       restartBtn.style.display = 'inline-block';
@@ -482,6 +523,9 @@
 
   function resetGame() {
     hideOverlay();
+    combo = 0;
+    comboTimer = 0;
+    screenShake = 0;
     player = { x: canvas.width / 2 - 28, y: canvas.height - 62, w: 56, h: 24, speed: 7 };
     bullets = [];
     enemyBullets = [];
@@ -626,6 +670,7 @@
   }
 
   function shootPlayer() {
+    if (!gameStarted) return;
     bullets.push({ x: player.x + player.w / 2 - 2.5, y: player.y - 14, w: 5, h: 14, speed: 9 });
     fireCooldown = 11;
     beep(780, 0.04, 'square', 0.02);
@@ -637,6 +682,11 @@
   }
 
   function updateEnemies() {
+    enemyAnimTimer++;
+    if (enemyAnimTimer > Math.max(6, 18 - level)) {
+      enemyAnimFrame = enemyAnimFrame ? 0 : 1;
+      enemyAnimTimer = 0;
+    }
     const living = enemies.filter(e => e.alive);
     let hitEdge = false;
 
@@ -712,6 +762,7 @@
         spawnExplosion(b.x, b.y, '#c084fc', 6);
         beep(260 + boss.hp * 4, 0.03, 'triangle', 0.02);
         if (boss.hp <= 0) {
+          screenShake = 14;
           boss.alive = false;
           score += 500 + level * 40;
           spawnExplosion(boss.x + boss.w / 2, boss.y + boss.h / 2, '#c084fc', 50);
@@ -725,7 +776,9 @@
           e.alive = false;
           e.flash = 4;
           b.y = -999;
-          score += 14 + (4 - e.row) * 3;
+          combo = Math.min(combo + 1, 10);
+          comboTimer = 120;
+          score += 14 + (4 - e.row) * 3 + combo * 2;
           spawnExplosion(e.x + e.w / 2, e.y + e.h / 2, e.row < 2 ? '#ff7aa2' : e.row < 4 ? '#ffd166' : '#73ffa9', 12);
           beep(280 + (4 - e.row) * 80, 0.04, 'square', 0.02);
           break;
@@ -741,6 +794,7 @@
         b.y = canvas.height + 100;
         lives -= 1;
         spawnExplosion(player.x + player.w / 2, player.y + player.h / 2, '#6ee7ff', 24);
+        screenShake = 8;
         beep(140, 0.12, 'sawtooth', 0.04);
         player.x = canvas.width / 2 - player.w / 2;
         if (lives <= 0) {
@@ -794,6 +848,9 @@
   }
 
   function updateParticles() {
+    if (comboTimer > 0) comboTimer--;
+    else combo = 0;
+    if (screenShake > 0) screenShake *= 0.85;
     for (const p of particles) {
       p.x += p.vx || 0;
       p.y += p.vy || 0;
@@ -825,7 +882,11 @@
   }
 
   function drawBackground() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (screenShake > 0.5) {
+      ctx.setTransform(1, 0, 0, 1, (Math.random() - 0.5) * screenShake, (Math.random() - 0.5) * screenShake);
+    }
 
     const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
     g.addColorStop(0, '#030816');
@@ -873,8 +934,13 @@
       ctx.fillRect(e.w - 8, 12, 8, 8);
       ctx.clearRect(12, 12, 6, 6);
       ctx.clearRect(e.w - 18, 12, 6, 6);
-      ctx.fillRect(10, e.h - 6, 6, 6);
-      ctx.fillRect(e.w - 16, e.h - 6, 6, 6);
+      if (enemyAnimFrame) {
+        ctx.fillRect(6, e.h - 4, 6, 4);
+        ctx.fillRect(e.w - 12, e.h - 4, 6, 4);
+      } else {
+        ctx.fillRect(10, e.h - 6, 6, 6);
+        ctx.fillRect(e.w - 16, e.h - 6, 6, 6);
+      }
       ctx.restore();
     }
   }
@@ -966,11 +1032,11 @@
   }
 
   function drawStartHint() {
-    if (score !== 0 || level !== 1 || bullets.length || enemyBullets.length) return;
+    if (gameStarted || score !== 0 || level !== 1 || bullets.length || enemyBullets.length) return;
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.font = 'bold 24px Arial';
-    ctx.fillText('Press Space or 🔥 to start the battle', canvas.width / 2, canvas.height - 28);
+    ctx.fillText('Tap Start below to begin', canvas.width / 2, canvas.height - 28);
   }
 
   function draw() {
@@ -986,7 +1052,7 @@
   }
 
   function update() {
-    if (gameOver || paused) return;
+    if (!gameStarted || gameOver || paused) return;
 
     if (fireCooldown > 0) fireCooldown--;
 
@@ -1028,6 +1094,7 @@
     requestAnimationFrame(loop);
   }
 
+  syncInitialsDisplay();
   renderLeaderboard();
   resetGame();
   highscoreEl.textContent = highScore;
