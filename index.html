@@ -325,6 +325,7 @@
   const leaderboardList = document.getElementById('leaderboardList');
   const initialsDisplay = document.getElementById('initialsDisplay');
   const letterEls = [document.getElementById('letter0'), document.getElementById('letter1'), document.getElementById('letter2')];
+  const startBtn = document.getElementById('startBtn');
 
   const keys = {};
   const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -357,6 +358,11 @@
       e.preventDefault();
       keys[key] = true;
       if (!audioReady) initAudio();
+      if (!gameStarted && key === ' ') {
+        gameStarted = true;
+        startBtn.textContent = 'Playing...';
+        startBtn.disabled = true;
+      }
     };
     const release = (key) => (e) => {
       e.preventDefault();
@@ -377,6 +383,12 @@
   }
 
   window.addEventListener('load', bindMobileControls);
+  startBtn.addEventListener('click', () => {
+    gameStarted = true;
+    startBtn.textContent = 'Playing...';
+    startBtn.disabled = true;
+    if (!audioReady) initAudio();
+  });
   restartBtn.addEventListener('click', () => {
     hideOverlay();
     resetGame();
@@ -390,8 +402,13 @@
     keys[k] = true;
     if ([' ', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(k) || e.key === ' ') e.preventDefault();
     if (!audioReady) initAudio();
+    if (!gameStarted && (k === ' ' || k === 'enter')) {
+      gameStarted = true;
+      startBtn.textContent = 'Playing...';
+      startBtn.disabled = true;
+    }
     if (gameOver && e.key === 'Enter') resetGame();
-    if (k === 'p' && !gameOver) paused = !paused;
+    if (k === 'p' && !gameOver && gameStarted) paused = !paused;
   });
 
   document.addEventListener('keyup', (e) => {
@@ -522,6 +539,9 @@
   }
 
   function resetGame() {
+    gameStarted = false;
+    startBtn.textContent = 'Start Game';
+    startBtn.disabled = false;
     hideOverlay();
     combo = 0;
     comboTimer = 0;
